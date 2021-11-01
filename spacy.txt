@@ -1,0 +1,64 @@
+import pandas as pd
+import numpy as np
+from keras import regularizers, optimizers
+from keras.layers.experimental.preprocessing import TextVectorization
+from keras.layers import Embedding, Dense, Dropout, Input, LSTM, GlobalMaxPool1D
+from keras.models import Sequential
+from keras.initializers import Constant
+import tensorflow as tf
+import spacy
+
+# download and import the large english model.
+!python -m spacy download en_core_web_lg
+import en_core_web_lg
+
+nlp = en_core_web_lg.load()
+Vectorizer = TextVectorization()
+
+#load the data 
+text = pd.read_csv('https://github.com/Violet-Spiral/assessing-childrens-writing/raw/main/data/samples_no_title.csv').dropna()
+
+#fit the vectorizer on the text and extract the corpus vocabulary
+Vectorizer.adapt(text.Text.to_numpy())
+vocab = Vectorizer.get_vocabulary()
+
+#generate the embedding matrix
+num_tokens = len(vocab)
+embedding_dim = len(nlp('The').vector)
+embedding_matrix = np.zeros((num_tokens, embedding_dim))
+for i, word in enumerate(vocab):
+    embedding_matrix[i] = nlp(word).vector
+
+#Load the embedding matrix as the weights matrix for the embedding layer and set trainable to False
+Embedding_layer=Embedding(
+    num_tokens,
+    embedding_dim,
+    embeddings_initializer=Constant(embedding_matrix),
+    trainable=False)
+
+#build the model.  This is a bigger one, but it works well on this problem.
+model = Sequential()
+model.add(Input(shape=(1,), dtype=tf.string))
+model.add(Vectorizer)
+model.add(Embedding_layer)
+model.add(LSTM(25, return_sequences=True))
+model.add(GlobalMaxPool1D())
+model.add(Dropout(0.5))
+model.add(Dense(32, activation='tanh', 
+                kernel_regularizer = regularizers.l1_l2(l1=1e-5, l2=1e-4)))
+model.add(Dropout(0.5))
+model.add(Dense(32, activation='tanh', 
+                kernel_regularizer = regularizers.l1_l2(l1=1e-5, l2=1e-4)))    
+model.add(Dense(1))
+
+adam = optimizers.Adam(learning_rate=.01, decay=1e-2)
+model.compile(optimizer = adam, loss = 'mean_absolute_error', metrics = None)
+
+print(model.summary())
+
+#fit the model
+model.fit(text.Text,
+          text.Grade,
+          batch_size = 10,
+          epochs = 50,
+          validation_split=.2)
